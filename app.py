@@ -3,12 +3,16 @@ import pandas as pd
 import streamlit as st
 import time
 
-st.set_page_config(page_title="Crypto Market Screener", layout="wide")
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
 
-st.title("📊 Crypto Market Screener")
-st.caption("Top 100 Coin | Ranking Score | Alert Otomatis")
+# ================= STREAMLIT CONFIG =================
+st.set_page_config(page_title="Market Radar", layout="wide")
+st.title("📊 Crypto Market Radar")
+st.caption("Top 100 Coin | Ranking | AI/ML Clustering")
 
-@st.cache_data(ttl=60)
+# ================= DATA SOURCE =================
+@st.cache_data(ttl=120)
 def get_top_100():
     url = "https://api.coingecko.com/api/v3/coins/markets"
     params = {
@@ -18,12 +22,12 @@ def get_top_100():
         "page": 1,
         "price_change_percentage": "24h"
     }
-    response = requests.get(url, params=params, timeout=10)
-    response.raise_for_status()
-    return pd.DataFrame(response.json())
+    r = requests.get(url, params=params, timeout=10)
+    r.raise_for_status()
+    return pd.DataFrame(r.json())
 
 try:
-    # ================= DATA =================
+    # ================= LOAD DATA =================
     df = get_top_100()
 
     df = df[[
@@ -44,8 +48,8 @@ try:
         "Volume"
     ]
 
-    # ================= FILTER =================
-    st.subheader("⚙️ Filter Market")
+    # ================= USER FILTER =================
+    st.subheader("⚙️ Market Filter")
 
     min_change = st.slider(
         "Minimal % perubahan harga (24h)",
@@ -53,14 +57,6 @@ try:
         max_value=20.0,
         value=2.0,
         step=0.5
-    )
-
-    min_score = st.slider(
-        "Minimal Score untuk Alert",
-        min_value=0.0,
-        max_value=50.0,
-        value=15.0,
-        step=1.0
     )
 
     # ================= SCORE SYSTEM =================
@@ -79,48 +75,62 @@ try:
 
     filtered = ranked[ranked["24h Change (%)"] >= min_change]
 
-    # ================= TABLE =================
-    st.subheader("🏆 Top Ranked Coin Sekarang")
-    st.caption("Top 10 berdasarkan score | Slider = filter tambahan")
+    # ================= AI / ML CLUSTERING =================
+    features = filtered[[
+        "24h Change (%)",
+        "Volume",
+        "Rank",
+        "Score"
+    ]]
+
+    if len(features) >= 3:
+        scaler = StandardScaler()
+        scaled_features = scaler.fit_transform(features)
+
+        kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
+        filtered["Cluster"] = kmeans.fit_predict(scaled_features)
+
+        cluster_summary = (
+            filtered.groupby("Cluster")
+            .agg({
+                "Score": "mean",
+                "24h Change (%)": "mean",
+                "Volume": "mean"
+            })
+            .sort_values("Score", ascending=False)
+        )
+
+        best_cluster = cluster_summary.index[0]
+
+        filtered["AI_Label"] = filtered["Cluster"].apply(
+            lambda x: "🟢 Potensi Momentum" if x == best_cluster else "⚪ Netral"
+        )
+    else:
+        filtered["AI_Label"] = "⚪ Data Kurang"
+
+    # ================= TABLE OUTPUT =================
+    st.subheader("🤖 AI Screener — Coin dengan Potensi Momentum")
 
     st.dataframe(
-        filtered[[
+        filtered[
+            filtered["AI_Label"] == "🟢 Potensi Momentum"
+        ][[
             "Rank",
             "Coin",
             "Symbol",
             "Price (USD)",
             "24h Change (%)",
             "Volume",
-            "Score"
+            "Score",
+            "AI_Label"
         ]].head(10),
         use_container_width=True
     )
 
-    # ================= ALERT =================
-    alerts = filtered[filtered["Score"] >= min_score]
-
-    st.subheader("🚨 Market Alert")
-
-    if not alerts.empty:
-        st.error("🚨 ALERT! Coin dengan peluang tinggi terdeteksi")
-
-        for _, row in alerts.iterrows():
-            st.markdown(
-                f"""
-                **{row['Coin']} ({row['Symbol'].upper()})**  
-                💰 Price: ${row['Price (USD)']:.2f}  
-                📈 24h Change: {row['24h Change (%)']:.2f}%  
-                🧮 Score: {row['Score']:.2f}
-                ---
-                """
-            )
-    else:
-        st.success("✅ Tidak ada alert — market relatif tenang")
-
 except Exception as e:
-    st.error(f"❌ Error ambil data: {e}")
+    st.error(f"❌ Error: {e}")
 
-st.caption("🔄 Auto refresh setiap 60 detik")
-time.sleep(60)
+# ================= AUTO REFRESH =================
+st.caption("🔄 Auto refresh setiap 120 detik")
+time.sleep(120)
 st.rerun()
-
