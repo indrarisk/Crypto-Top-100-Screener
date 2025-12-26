@@ -132,5 +132,5 @@ except Exception as e:
 
 # ================= AUTO REFRESH =================
 st.caption("🔄 Auto refresh setiap 120 detik")
-time.sleep(120)
-st.rerun()
+
+
